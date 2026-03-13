@@ -39,6 +39,8 @@ Best used with [SuperWow](https://github.com/balakethelock/SuperWoW/) enabled.
 * Pass on greys option.
 * Holy Water Only option for Stratholme chests.
 
+> **Note:** If you see "Already looted" messages, your client likely has a patch that enables auto-loot by default. You don't need this with EasyLoot since it handles autolooting itself. You can disable the client-side auto-loot patch to avoid conflicts.
+
 ### Whitelists
 * Whitelists for making specific items always roll need, greed, or pass. Includes BoP items.
 * * Each whitelist can be toggled on/off independently.

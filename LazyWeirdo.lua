@@ -521,18 +521,20 @@ for _,raid in ipairs(raid_config) do
 end
 
 -- Determine what kind of roll we want for the item and do the pass, or roll of need or greed
--- returns the roll type, if it was in an explicit list, and if it's a BoE item
-function LazyWeirdo:HandleItem(name,explicit_only)
+-- returns the roll type and whether it matched a whitelist
+function LazyWeirdo:HandleItem(name, item_info)
   -- check specific lists first
   if LazyWeirdoDB.settings.need_whitelist and fuzzy_elem(LazyWeirdoDB.needlist,name) then
-    return NEED,true,false
+    return NEED, true
   elseif LazyWeirdoDB.settings.greed_whitelist and fuzzy_elem(LazyWeirdoDB.greedlist,name) then
-    return GREED,true,false
+    return GREED, true
   elseif LazyWeirdoDB.settings.pass_whitelist and fuzzy_elem(LazyWeirdoDB.passlist,name) then
-    return PASS,true,false
+    return PASS, true
   end
 
-  -- check raid zone item lists (BoP items match explicit lists, BoE items also get fallback)
+  local is_bop = item_info and item_info.bop
+
+  -- check raid zone item lists
   local zone = GetRealZoneText()
   for _,raid in ipairs(raid_config) do
     if raid.zone == zone or (raid.aliases and elem(raid.aliases, zone)) then
@@ -541,26 +543,26 @@ function LazyWeirdo:HandleItem(name,explicit_only)
         if cat.is_boe then
           boe_cat = cat
         elseif cat.items and elem(cat.items, name) then
-          return LazyWeirdoDB.settings[cat.key],false,false
+          return LazyWeirdoDB.settings[cat.key], false
         end
       end
-      -- BoP items that didn't match any explicit item list: don't auto-roll
-      if explicit_only then return OFF,false,false end
+      -- BoP items not on an explicit list: don't auto-roll
+      if is_bop then return OFF, false end
       -- BoE fallback for the zone
       if boe_cat then
-        return LazyWeirdoDB.settings[boe_cat.key],false,true
+        return LazyWeirdoDB.settings[boe_cat.key], false
       end
-      return LazyWeirdoDB.settings.general_boe_rule,false,true
+      return LazyWeirdoDB.settings.general_boe_rule, false
     end
   end
-  if explicit_only then return OFF,false,false end
-  return LazyWeirdoDB.settings.general_boe_rule,false,true
+  if is_bop then return OFF, false end
+  return LazyWeirdoDB.settings.general_boe_rule, false
 end
 
 -- 0 pass, 1 need, 2 greed
 function LazyWeirdo:START_LOOT_ROLL(roll_id,time_left)
   local _texture, name, _count, quality, bop = GetLootRollItemInfo(roll_id)
-  local r = LazyWeirdo:HandleItem(name,bop)
+  local r = LazyWeirdo:HandleItem(name, {bop = bop})
   if r >= 0 then RollOnLoot(roll_id,r) end
 end
 
@@ -575,7 +577,7 @@ function LazyWeirdo:LOOT_BIND_CONFIRM(slot)
   -- check whitelists if in group, say if everyone passed already
   -- could happen if you shift-click the boss and don't autoloot
   local _texture, item, _quantity, quality = GetLootSlotInfo(slot)
-  local r = LazyWeirdo:HandleItem(item,true) -- we're in a group, use explicit still
+  local r = LazyWeirdo:HandleItem(item, {bop = true})
   if r > 0 then
     debug_print("party bind")
     table.insert(binds,slot)
@@ -589,7 +591,7 @@ end
 -- a BoP item ask, these can be autorolled but only by explicit whitelist
 function LazyWeirdo:CONFIRM_LOOT_ROLL(roll_id,roll_type)
   local _texture, name, _count, quality, bop = GetLootRollItemInfo(roll_id)
-  local r = LazyWeirdo:HandleItem(name,bop)
+  local r = LazyWeirdo:HandleItem(name, {bop = bop})
 
   if r == OFF then return end
   if r == roll_type then
@@ -600,6 +602,43 @@ function LazyWeirdo:CONFIRM_LOOT_ROLL(roll_id,roll_type)
   end
 end
 
+
+local elTooltip = CreateFrame("GameTooltip", "elTooltip", UIParent, "GameTooltipTemplate")
+
+-- item info cache keyed by item name
+-- values: { bop = bool, boe = bool, quest = bool, unique = bool }
+local item_info_cache = {}
+
+local function ScanLootItem(slot)
+  local _texture, name = GetLootSlotInfo(slot)
+  if not name then return nil end
+  if item_info_cache[name] then return item_info_cache[name] end
+
+  elTooltip:SetOwner(UIParent, "ANCHOR_PRESERVE")
+  elTooltip:SetLootItem(slot)
+
+  local info = { bop = false, boe = false, quest = false, unique = false }
+  for i = 2, elTooltip:NumLines() do
+    local line = getglobal("elTooltipTextLeft"..i)
+    if line then
+      local text = line:GetText()
+      if text then
+        if text == "Soulbound" or text == "Binds when picked up" then
+          info.bop = true
+        elseif text == "Binds when equipped" then
+          info.boe = true
+        elseif text == "Quest Item" then
+          info.quest = true
+        elseif text == "Unique" then
+          info.unique = true
+        end
+      end
+    end
+  end
+
+  item_info_cache[name] = info
+  return info
+end
 
 -- obnoxious hook to solve pfui not clearing itself properly
 local orig_pfUI_UpdateLootFrame = function () end
@@ -636,20 +675,27 @@ function LazyWeirdo:LOOT_OPENED()
     elseif LootSlotIsItem(slot) then
       local loot_method = GetLootMethod()
       local _texture, item, _quantity, quality = GetLootSlotInfo(slot)
-      local r,in_explicit_list,is_boe = LazyWeirdo:HandleItem(item)
+      local info = ScanLootItem(slot)
+      local r, on_whitelist = LazyWeirdo:HandleItem(item, info)
+      local is_boe = info and info.boe
       local is_container = not (UnitExists("target") and UnitIsDead("target")) -- best we can do
 
       -- determine loot to skip
-      if in_explicit_list and (r == PASS) then
+      if on_whitelist and (r == PASS) then
         -- loot is on our pass list
         debug_print("passlist "..item)
-      elseif (quality == 0 and LazyWeirdoDB.settings.pass_greys) and not (r > 0 and in_explicit_list) then
+
+      -- quest items are always personal loot, grab them regardless of group/ML state
+      elseif info and info.quest then
+        debug_print("questloot "..item)
+        LootSlot(slot,true)
+      elseif (quality == 0 and LazyWeirdoDB.settings.pass_greys) and not (r > 0 and on_whitelist) then
         -- do nothing, unless it's a whitelist item
         debug_print("passgrey " .. item)
       elseif (r == OFF or r == PASS) and InGroup() and not is_boe then
-        -- non-BoE item set to pass/off in group, skip looting (e.g. coins, bijous, scarabs)
+        -- non-BoE item set to pass/off in group, skip looting
         debug_print("passgroup "..item)
-      -- if we are looting from a chest, ignore further loot rules
+      -- if we are looting from a chest, ignore further loot rules as bops will still ask
       elseif is_container then
         -- container
         debug_print("conatinerloot "..item)
@@ -666,14 +712,9 @@ function LazyWeirdo:LOOT_OPENED()
           LootSlot(slot,true)
         end
       elseif InGroup() and (loot_method == "master") then
-        -- don't loot since masterloot is on anyway
         debug_print("masterloot on "..item)
 
       -- finally loot whatever wasn't handled above
-      -- elseif not InGroup() then
-      --   -- we're alone and we've check the skiplist already, loot
-      --   debug_print("aloneloot "..item)
-      --   LootSlot(slot,true)
       else
         debug_print("looting "..item)
         LootSlot(slot,true)
@@ -814,8 +855,6 @@ function LazyWeirdo:RESURRECT_REQUEST()
     StaticPopup_Hide("RESURRECT_NO_SICKNESS")
   end
 end
-
-local elTooltip = CreateFrame("GameTooltip", "elTooltip", UIParent, "GameTooltipTemplate")
 
 local mount_searches = {"Increases speed based", "Slow and steady", "Speed scales with your"}
 local gather_searches = {"Find Herbs", "Find Minerals"}
