@@ -990,7 +990,9 @@ function LazyWeirdo:MERCHANT_SHOW()
         local link = GetContainerItemLink(bag, slot)
         if link and string.find(link, "ff9d9d9d") then
           local _, count = GetContainerItemInfo(bag, slot)
-          table.insert(sell_queue, { bag = bag, slot = slot, name = "Grey Items", count = count or 1, is_grey = true })
+          local _, _, itemStr = string.find(link, "(item:%d+:%d+:%d+:%d+)")
+          local _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(itemStr)
+          table.insert(sell_queue, { bag = bag, slot = slot, name = "Grey Items", count = count or 1, is_grey = true, price = (sellPrice or 0) * (count or 1) })
         end
       end
     end
@@ -1004,9 +1006,11 @@ function LazyWeirdo:MERCHANT_SHOW()
           if name then
             local lname = string.lower(name)
             for _,entry in ipairs(LazyWeirdoDB.selllist) do
-              if entry.enabled ~= false and string.find(lname, string.lower(entry.name), nil, false) then
+              if entry.enabled ~= false and string.find(lname, string.lower("^" .. entry.name .. "$")) then
                 local _, count = GetContainerItemInfo(bag, slot)
-                table.insert(sell_queue, { bag = bag, slot = slot, name = name, count = count or 1 })
+                local _, _, itemStr = string.find(link, "(item:%d+:%d+:%d+:%d+)")
+                local _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(itemStr)
+                table.insert(sell_queue, { bag = bag, slot = slot, name = name, count = count or 1, price = (sellPrice or 0) * (count or 1) })
                 break
               end
             end
@@ -1022,69 +1026,34 @@ function LazyWeirdo:MERCHANT_SHOW()
     local f = LazyWeirdo.vendorSellFrame
     f.queue = sell_queue
     f.index = 1
-    f.timeout = GetTime() + 7
-    f.opTimeout = 0
-    f.waiting = false
-    f.closed = false
-    f.money_snap = GetMoney()
-    f.results = {}       -- { [name] = { count, earned } }
-    f.result_order = {}  -- preserves insertion order
-    f.PrintResults = function(self)
-      for _, key in ipairs(self.result_order) do
-        local r = self.results[key]
-        if r.earned > 0 then
-          local display = r.is_grey and key or (ITEM_COLOR .. key .. "|r")
-          el_print(format("Sold %dx %s for: %s", r.count, display, FormatMoney(r.earned)))
-        end
-      end
-      self:SetScript("OnUpdate", nil)
-      self.queue = nil
-      self.waiting = false
-      self.closed = false
-      self.results = nil
-      self.result_order = nil
-    end
-
+    f.results = {}
+    f.result_order = {}
     f:SetScript("OnUpdate", function()
-      if GetTime() > this.timeout then
-        this:PrintResults()
-        return
-      end
-      if this.closed then
-        this:PrintResults()
-        return
-      end
-      if this.waiting then
-        local prev = this.queue[this.index - 1]
-        if GetContainerItemLink(prev.bag, prev.slot) then
-          if GetTime() > this.opTimeout then
-            this.waiting = false
-          end
-          return
-        end
-        -- item sold: attribute earnings
-        local now = GetMoney()
-        local earned = now - this.money_snap
-        this.money_snap = now
-        local key = prev.name
-        if not this.results[key] then
-          this.results[key] = { count = 0, earned = 0, is_grey = prev.is_grey }
-          table.insert(this.result_order, key)
-        end
-        this.results[key].count = this.results[key].count + prev.count
-        this.results[key].earned = this.results[key].earned + earned
-        this.waiting = false
-      end
+      if (this.tick or 1) > GetTime() then return else this.tick = GetTime() + 0.1 end
       local item = this.queue[this.index]
-      if not item or this.closed then
-        this:PrintResults()
+      if not item then
+        for _, key in ipairs(this.result_order) do
+          local r = this.results[key]
+          if r.earned > 0 then
+            local display = r.is_grey and key or (ITEM_COLOR .. key .. "|r")
+            el_print(format("Sold %dx %s for: %s", r.count, display, FormatMoney(r.earned)))
+          end
+        end
+        this:SetScript("OnUpdate", nil)
+        this.result_order = nil
+        this.results = nil
         return
       end
-      this.money_snap = GetMoney()
+      local key = item.name
+      if not this.results[key] then
+        this.results[key] = { count = 0, earned = 0, is_grey = item.is_grey }
+        table.insert(this.result_order, key)
+      end
+      this.results[key].count = this.results[key].count + item.count
+      this.results[key].earned = this.results[key].earned + item.price
+      ClearCursor()
       UseContainerItem(item.bag, item.slot)
       this.index = this.index + 1
-      this.waiting = true
-      this.opTimeout = GetTime() + 2
     end)
   end
 
@@ -1099,7 +1068,7 @@ function LazyWeirdo:MERCHANT_SHOW()
             local link = GetContainerItemLink(bag, slot)
             if link then
               local bagName = ItemLinkToName(link)
-              if bagName and string.lower(bagName) == string.lower(entry.name) then
+              if bagName and string.find(string.lower(bagName), string.lower("^" .. entry.name .. "$")) then
                 local _,count = GetContainerItemInfo(bag, slot)
                 inBags = inBags + (count or 1)
               end
@@ -1110,7 +1079,7 @@ function LazyWeirdo:MERCHANT_SHOW()
         if needed > 0 then
           for i = 1, GetMerchantNumItems() do
             local mName, _, _, stackSize = GetMerchantItemInfo(i)
-            if mName and string.lower(mName) == string.lower(entry.name) then
+            if mName and string.find(string.lower(mName), string.lower("^" .. entry.name .. "$")) then
               stackSize = stackSize or 1
               local stacks = math.ceil(needed / stackSize)
               BuyMerchantItem(i, stacks)
@@ -1125,8 +1094,18 @@ function LazyWeirdo:MERCHANT_SHOW()
 end
 
 function LazyWeirdo:MERCHANT_CLOSED()
-  if LazyWeirdo.vendorSellFrame and LazyWeirdo.vendorSellFrame:GetScript("OnUpdate") then
-    LazyWeirdo.vendorSellFrame.closed = true
+  local f = LazyWeirdo.vendorSellFrame
+  if f and f.result_order then
+    for _, key in ipairs(f.result_order) do
+      local r = f.results[key]
+      if r.earned > 0 then
+        local display = r.is_grey and key or (ITEM_COLOR .. key .. "|r")
+        el_print(format("Sold %dx %s for: %s", r.count, display, FormatMoney(r.earned)))
+      end
+    end
+    f:SetScript("OnUpdate", nil)
+    f.result_order = nil
+    f.results = nil
   end
 end
 
