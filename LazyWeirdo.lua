@@ -677,7 +677,7 @@ function LazyWeirdo:LOOT_OPENED()
       local _texture, item, _quantity, quality = GetLootSlotInfo(slot)
       local info = ScanLootItem(slot)
       local r, on_whitelist = LazyWeirdo:HandleItem(item, info)
-      local is_bop = info and info.bop
+      local is_bind = info and (info.bop or info.boe)
       local is_container = not (UnitExists("target") and UnitIsDead("target")) -- best we can do
 
       -- determine loot to skip
@@ -703,8 +703,8 @@ function LazyWeirdo:LOOT_OPENED()
       elseif (quality == 0 and LazyWeirdoDB.settings.pass_greys) and not (r > 0 and on_whitelist) then
         -- do nothing, unless it's a whitelist item
         debug_print("passgrey " .. item)
-      elseif (r == OFF or r == PASS) and InGroup() and is_bop then
-        -- BoP item set to pass/off in group, skip looting
+      elseif (r == OFF or r == PASS) and InGroup() and is_bind then
+        -- BoP/BoE item set to pass/off in group, skip looting
         debug_print("passgroup "..item)
       -- if we are looting from a chest, ignore further loot rules as bops will still ask
       elseif is_container then
