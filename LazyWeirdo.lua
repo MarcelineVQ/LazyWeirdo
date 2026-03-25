@@ -1,5 +1,4 @@
 -- || Made by and for Weird Vibes of Turtle WoW || --
--- this is a test with VSC integration, ignore the mess
 
 local DEV_MODE = false -- set to true to keep config frame open on reload
 
