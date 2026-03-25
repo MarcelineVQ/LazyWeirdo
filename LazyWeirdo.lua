@@ -677,7 +677,7 @@ function LazyWeirdo:LOOT_OPENED()
       local _texture, item, _quantity, quality = GetLootSlotInfo(slot)
       local info = ScanLootItem(slot)
       local r, on_whitelist = LazyWeirdo:HandleItem(item, info)
-      local is_boe = info and info.boe
+      local is_bop = info and info.bop
       local is_container = not (UnitExists("target") and UnitIsDead("target")) -- best we can do
 
       -- determine loot to skip
@@ -686,14 +686,25 @@ function LazyWeirdo:LOOT_OPENED()
         debug_print("passlist "..item)
 
       -- quest items are always personal loot, grab them regardless of group/ML state
+      -- unless they're also BoP and we are the master looter
       elseif info and info.quest then
-        debug_print("questloot "..item)
-        LootSlot(slot,true)
+        if info.bop then
+          local _, _, mlRaidId = GetLootMethod()
+          if mlRaidId and UnitIsUnit("player", "raid" .. mlRaidId) then
+            debug_print("questloot bop ML skip "..item)
+          else
+            debug_print("questloot bop "..item)
+            LootSlot(slot,true)
+          end
+        else
+          debug_print("questloot "..item)
+          LootSlot(slot,true)
+        end
       elseif (quality == 0 and LazyWeirdoDB.settings.pass_greys) and not (r > 0 and on_whitelist) then
         -- do nothing, unless it's a whitelist item
         debug_print("passgrey " .. item)
-      elseif (r == OFF or r == PASS) and InGroup() and not is_boe then
-        -- non-BoE item set to pass/off in group, skip looting
+      elseif (r == OFF or r == PASS) and InGroup() and is_bop then
+        -- BoP item set to pass/off in group, skip looting
         debug_print("passgroup "..item)
       -- if we are looting from a chest, ignore further loot rules as bops will still ask
       elseif is_container then
