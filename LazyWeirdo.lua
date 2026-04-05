@@ -705,15 +705,6 @@ function LazyWeirdo:LOOT_OPENED()
       elseif (r == OFF or r == PASS) and InGroup() and is_bind then
         -- BoP/BoE item set to pass/off in group, skip looting
         debug_print("passgroup "..item)
-      elseif InGroup() and (loot_method == "group" or loot_method == "needbeforegreed") then
-        -- check the current threshold so it doens't try to loot something already being rolled for
-        if quality >= GetLootThreshold() then
-          -- a group roll will happen, don't loot the slot manually or you'll get an error
-          debug_print("grouploot "..item)
-        else
-          debug_print("grouploot below threshhold "..item)
-          LootSlot(slot,true)
-        end
       elseif InGroup() and (loot_method == "master") then
         debug_print("masterloot on "..item)
 
@@ -915,6 +906,9 @@ function LazyWeirdo:UI_ERROR_MESSAGE(msg)
   end
   if LazyWeirdoDB.settings.auto_stand and string.find(arg1, "must be standing") then
     SitOrStand()
+    UIErrorsFrame:Clear()
+  end
+  if string.find(arg1, "still being rolled") then
     UIErrorsFrame:Clear()
   end
 end
