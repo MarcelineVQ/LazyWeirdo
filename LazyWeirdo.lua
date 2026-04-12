@@ -169,7 +169,9 @@ local function fuzzy_elem(t,item)
   if type(item) == "string" then
     item = string.lower(item)
     for _,v in pairs(t) do
-      if string.find(string.lower(v),item,nil,false) then -- false, don't use regex
+      local name = type(v) == "table" and v.name or v
+      local enabled = type(v) ~= "table" or v.enabled ~= false
+      if enabled and string.find(string.lower(name),item,nil,true) then
         return true
       end
     end
@@ -926,6 +928,12 @@ function LazyWeirdo:Load()
   LazyWeirdoDB.needlist = LazyWeirdoDB.needlist or {}
   LazyWeirdoDB.greedlist = LazyWeirdoDB.greedlist or {}
   LazyWeirdoDB.passlist = LazyWeirdoDB.passlist or {}
+  -- migrate plain-string entries to toggleable { name, enabled } objects
+  for _,list in ipairs({ LazyWeirdoDB.needlist, LazyWeirdoDB.greedlist, LazyWeirdoDB.passlist }) do
+    for i,v in ipairs(list) do
+      if type(v) == "string" then list[i] = { name = v, enabled = true } end
+    end
+  end
   LazyWeirdoDB.buylist = LazyWeirdoDB.buylist or {}
   LazyWeirdoDB.selllist = LazyWeirdoDB.selllist or {}
 
@@ -1948,6 +1956,7 @@ StaticPopupDialogs["ADD_ITEM_NAME"] = {
   button1 = "Add",
   button2 = "Cancel",
   hasEditBox = true,
+  maxLetters = 255,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
@@ -1989,6 +1998,7 @@ StaticPopupDialogs["ADD_BUY_ITEM"] = {
   button1 = "Add",
   button2 = "Cancel",
   hasEditBox = true,
+  maxLetters = 255,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
@@ -2013,9 +2023,9 @@ local right_col_dropdowns = {
   { type = "options", y = -45  },
   { type = "list",   y = -80,   label = "Buy List",   list = "buylist",   setting = "auto_buy",        tooltip = "Auto-buy items from vendors.", popup = "ADD_BUY_ITEM", toggleable = true },
   { type = "list",   y = -115,  label = "Sell List",   list = "selllist",  setting = "auto_sell_list",  tooltip = "A list of items that will always be sold at vendors.", toggleable = true },
-  { type = "list",   y = -215,  label = "Need List",  list = "needlist",  setting = "need_whitelist",  tooltip = "A list of items that will always be Needed, even BoP items." },
-  { type = "list",   y = -245,  label = "Greed List", list = "greedlist", setting = "greed_whitelist", tooltip = "A list of items that will always be Greeded, even BoP items." },
-  { type = "list",   y = -275,  label = "Pass List",  list = "passlist",  setting = "pass_whitelist",  tooltip = "A list of items that will always be Passed, and not auto-looted." },
+  { type = "list",   y = -215,  label = "Need List",  list = "needlist",  setting = "need_whitelist",  tooltip = "A list of items that will always be Needed, even BoP items.", toggleable = true },
+  { type = "list",   y = -245,  label = "Greed List", list = "greedlist", setting = "greed_whitelist", tooltip = "A list of items that will always be Greeded, even BoP items.", toggleable = true },
+  { type = "list",   y = -275,  label = "Pass List",  list = "passlist",  setting = "pass_whitelist",  tooltip = "A list of items that will always be Passed, and not auto-looted.", toggleable = true },
 }
 for _,dd in ipairs(right_col_dropdowns) do
   if dd.type == "options" then
